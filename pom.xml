@@ -9,7 +9,7 @@
 		<relativePath/>
 	</parent>
 	<groupId>com.myproject</groupId>
-	<artifactId>eventtrackingservice</artifactId>
+	<artifactId>event-tracking-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>event-tracking-service</name>
 	<properties>
