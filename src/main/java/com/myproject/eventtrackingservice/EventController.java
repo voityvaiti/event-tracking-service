@@ -1,6 +1,8 @@
 package com.myproject.eventtrackingservice;
 
 import com.myproject.eventtrackingservice.service.EventService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,11 +17,13 @@ import static com.myproject.eventtrackingservice.service.EventServiceImpl.SUCCES
 
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "Event")
 public class EventController {
 
     private final EventService eventService;
 
     @PostMapping("/event")
+    @Operation(summary = "Post events payload data")
     public ResponseEntity<Map<Integer, String>> processEventsPayload(@RequestBody String payload) {
 
         Map<Integer, String> eventProcessingResults = eventService.validateAndProcessEvents(payload);
@@ -44,6 +48,7 @@ public class EventController {
     }
 
     @GetMapping("/stats")
+    @Operation(summary = "Get events stats")
     public ResponseEntity<String> getStats() {
         return ResponseEntity.ok(eventService.getStats());
     }
