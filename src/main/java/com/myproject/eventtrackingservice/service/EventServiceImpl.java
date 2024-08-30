@@ -5,6 +5,7 @@ import jakarta.validation.*;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Service
@@ -14,10 +15,15 @@ public class EventServiceImpl implements EventService {
 
     private static final String DEFAULT_STATS = "0,0.0000000000,0.0000000000,0,0.000";
 
-    private static final int MINUTE_IN_MILLIS = 60000;
+    private static final int MINUTE_IN_MILLIS = 60 * 1000;
 
 
-    private final List<EventDto> events = Collections.synchronizedList(new ArrayList<>());
+    private final Deque<EventDto> eventDeque = new LinkedList<>();
+    private final ReentrantLock lock = new ReentrantLock();
+
+    private int eventCount = 0;
+    private double sumX = 0.0;
+    private long sumY = 0;
 
     private static final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 
@@ -25,58 +31,71 @@ public class EventServiceImpl implements EventService {
     @Override
     public String getStats() {
 
-        long currentTime = System.currentTimeMillis();
-        long past60Seconds = currentTime - MINUTE_IN_MILLIS;
+        cleanExpiredEvents();
 
-        List<EventDto> recentEvents = events.stream()
-                .filter(event -> event.getTimestamp() >= past60Seconds)
-                .toList();
-
-        if (recentEvents.isEmpty()) {
+        if (eventCount == 0) {
             return DEFAULT_STATS;
         }
 
-        int total = recentEvents.size();
-        double sumX = recentEvents.stream().mapToDouble(EventDto::getX).sum();
-        double avgX = sumX / total;
-        long sumY = recentEvents.stream().mapToLong(EventDto::getY).sum();
-        double avgY = (double) sumY / total;
+        double avgX = sumX / eventCount;
+        double avgY = (double) sumY / eventCount;
 
-        return String.format(Locale.US, "%d,%.10f,%.10f,%d,%.3f", total, sumX, avgX, sumY, avgY);
+        return String.format(Locale.US, "%d,%.10f,%.10f,%d,%.3f", eventCount, sumX, avgX, sumY, avgY);
     }
 
 
     @Override
-    public Map<Integer, String> validateAndProcessEvents(String payload) throws IllegalArgumentException {
+    public Map<Integer, String> validateAndProcessEvents(String payload) {
 
-        Map<Integer, String> eventsErrors = new HashMap<>();
+        Map<Integer, String> eventProcessingResults = new HashMap<>();
 
         String[] lines = payload.split("\n");
 
         for (int i = 0; i < lines.length; i++) {
 
             String result = processLine(lines[i]);
-            eventsErrors.put(i + 1, result);
+            eventProcessingResults.put(i + 1, result);
         }
 
-        return eventsErrors;
+        return eventProcessingResults;
+    }
+
+    private void cleanExpiredEvents() {
+
+        long past60Seconds = System.currentTimeMillis() - MINUTE_IN_MILLIS;
+
+        lock.lock();
+        try {
+
+            while (!eventDeque.isEmpty() && eventDeque.peekFirst().getTimestamp() < past60Seconds) {
+                EventDto expiredEvent = eventDeque.pollFirst();
+                eventCount--;
+                sumX -= expiredEvent.getX();
+                sumY -= expiredEvent.getY();
+            }
+
+        } finally {
+            lock.unlock();
+        }
+
     }
 
     private String processLine(String line) {
 
         return parseEvent(line)
-                .map(event -> validateEvent(event)
+                .map(event -> {
 
-                        .map(this::formatValidationErrors)
-                        .orElseGet(() -> {
+                    if (event.getTimestamp() < System.currentTimeMillis() - MINUTE_IN_MILLIS) {
+                        return "Event timestamp is too old and cannot be processed.";
+                    }
 
-                            synchronized (events) {
-                                events.add(event);
-                            }
-
-                            return SUCCESS_MESSAGE;
-                        })
-                )
+                    return validateEvent(event)
+                            .map(this::formatValidationErrors)
+                            .orElseGet(() -> {
+                                addEvent(event);
+                                return SUCCESS_MESSAGE;
+                            });
+                })
                 .orElse("Invalid event data format.");
     }
 
@@ -120,6 +139,38 @@ public class EventServiceImpl implements EventService {
 
         return Optional.of(validationErrors);
     }
+
+
+    private void addEvent(EventDto event) {
+
+        lock.lock();
+
+        try {
+            ListIterator<EventDto> iterator = ((LinkedList<EventDto>) eventDeque).listIterator(eventDeque.size());
+
+            while (iterator.hasPrevious()) {
+
+                EventDto current = iterator.previous();
+                if (current.getTimestamp() <= event.getTimestamp()) {
+                    iterator.next();
+                    iterator.add(event);
+                    break;
+                }
+            }
+
+            if (!iterator.hasPrevious()) {
+                eventDeque.addFirst(event);
+            }
+
+            eventCount++;
+            sumX += event.getX();
+            sumY += event.getY();
+
+        } finally {
+            lock.unlock();
+        }
+    }
+
 
     private String formatValidationErrors(Map<String, String> errors) {
         return errors.entrySet().stream()

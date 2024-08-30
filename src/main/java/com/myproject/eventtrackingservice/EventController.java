@@ -22,12 +22,12 @@ public class EventController {
     @PostMapping("/event")
     public ResponseEntity<Map<Integer, String>> processEventsPayload(@RequestBody String payload) {
 
-        Map<Integer, String> lineNumberToStatusInfo = eventService.validateAndProcessEvents(payload);
+        Map<Integer, String> eventProcessingResults = eventService.validateAndProcessEvents(payload);
 
-        boolean hasErrors = lineNumberToStatusInfo.values().stream()
+        boolean hasErrors = eventProcessingResults.values().stream()
                 .anyMatch(status -> !status.equals(SUCCESS_MESSAGE));
 
-        boolean hasSuccess = lineNumberToStatusInfo.values().stream()
+        boolean hasSuccess = eventProcessingResults.values().stream()
                 .anyMatch(status -> status.equals(SUCCESS_MESSAGE));
 
         HttpStatus status;
@@ -40,7 +40,7 @@ public class EventController {
             status = HttpStatus.ACCEPTED;
         }
 
-        return new ResponseEntity<>(lineNumberToStatusInfo, status);
+        return new ResponseEntity<>(eventProcessingResults, status);
     }
 
     @GetMapping("/stats")
